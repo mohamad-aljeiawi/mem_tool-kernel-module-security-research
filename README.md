@@ -1,19 +1,87 @@
-# RT / mem_tool kernel driver — analysis bundle
+# RTdrivers / `mem_tool` — Android ARM64 Kernel Rootkit Reverse-Engineering & Analysis
 
-Static reverse-engineering notes and an extracted, organized copy of the Android
-ARM64 kernel module shipped under the names "RT驱动" / "RTdrivers" / "Cycle1337".
-Analysis target: the eight `.sh` self-extracting installers in
-`dev增强版过检测/` plus the userland C++ client header `dev增强版对接.h`.
+Static reverse-engineering notes, IDA Pro walkthrough, ioctl map, loader
+dissection, and a from-source audit rebuild of the Android ARM64 kernel module
+distributed in the wild under the names **RT驱动**, **RTdrivers** and
+**Cycle1337** (internal symbol prefix: `mem_tool_*`).
 
-> **Threat-model warning.** This is a rootkit-class driver. The `.ko` files in
-> `mem_tool_driver/` are kept here for static analysis. Do **not** `insmod` any
-> of them on a device you care about. Once loaded the driver exposes ring-0
-> read/write into every other process on the system through a randomized
-> character device, hides itself from `lsmod` / `/proc/modules`, hides arbitrary
-> PIDs from the global task list, and overlays tmpfs on `/data/local/tmp/` to
-> conceal companion files. Any process that finds the random device file gets
-> full kernel-level access to banking apps, password managers, messaging keys,
-> etc., bypassing Android's per-uid sandbox.
+Analysis target: the eight `.sh` self-extracting installers in `dev/`
+(originally named `dev增强版过检测/`) plus the userland C++ client header
+`dev增强版对接.h`.
+
+---
+
+## 0. Attribution, disclaimer & purpose
+
+### 0.1 I am not the author of this driver
+
+This repository is an **independent reverse-engineering and static-analysis
+bundle**. I did **not** write the original `.ko`, the `.sh` loaders, or the
+userland client header. All copyright on those artifacts belongs to their
+original author.
+
+- **Original author / distributor:** **`@RTdrivers`** on Telegram —
+  <https://t.me/RTdrivers>
+- **Names seen in-the-wild:** `RT驱动`, `RTdrivers`, `Cycle1337`,
+  internal C symbols `mem_tool_dev_t` / `mem_tool_class` / `memdev`.
+- **This repository is maintained by** a third-party researcher
+  purely as a reverse-engineering & educational resource.
+  **No affiliation** with, and **no endorsement by**, `@RTdrivers`.
+
+If you are the original author and want attribution clarified or an artifact
+removed, open an issue — the goal here is public security research, not
+redistribution.
+
+### 0.2 Why this repository exists
+
+Published as an open-source **security-research artifact**. It exists so that
+other researchers, defenders, and curious engineers can:
+
+1. **Analyse the security posture** of the driver — classify what it does
+   (rootkit, info-stealer, cheat engine, backdoor, …) and measure the real
+   risk it poses to a device that loads it.
+2. **Read the code-level analysis** — the ioctl surface, stealth primitives
+   (module self-hide, tmpfs overlay, randomized device name), the ARM64
+   **PAN bypass** path, HW-breakpoint machinery, and the runtime
+   `kallsyms_lookup_name` resolver.
+3. **Understand its operation in depth** — how the self-extracting `.sh`
+   loaders embed an ELF after a `#离` marker, how the `.ko` hides itself
+   from `lsmod` / `/proc/modules` / `/sys/module`, and how the userland
+   client in `kernel_client.h` discovers the randomized `/dev/<rand>` node.
+4. **Rebuild parts of the code for manual verification.** `devwh-src/`
+   contains a clean-room C reimplementation of the same primitives so the
+   behaviour observed in the binary can be recompiled and re-tested by
+   hand. It is **not** byte-identical to the upstream `.ko` and is **not**
+   intended as a drop-in replacement.
+
+### 0.3 Threat-model warning — do not run this on a real device
+
+The `.ko` files under `mem_tool_driver/` are **rootkit-class kernel
+modules**, kept here **for static analysis only**. Do **not** `insmod` any of
+them on a device you care about. Once loaded, the driver:
+
+- exposes ring-0 read/write into every other process on the system
+  through a randomized character device,
+- hides itself from `lsmod` / `/proc/modules` / `/sys/module`,
+- hides arbitrary PIDs from the global task list,
+- overlays tmpfs on `/data/local/tmp/` to conceal companion files,
+- bypasses ARM64 PAN via direct `TTBR0_EL1` writes.
+
+Any process that finds the random device file gets full kernel-level
+access to banking apps, password managers, messaging keys, and anything
+else on the device — bypassing Android's per-uid sandbox. See §5 *Verdict*
+for the detailed threat profile.
+
+### 0.4 License / legal use
+
+The original binaries and the userland header are reproduced here under
+a **research / fair-use** claim for the purpose of security analysis,
+malware classification, and educational reverse engineering. No warranty.
+Using any artifact in this repository to gain unauthorized access to
+systems, to distribute cheats, or in violation of any law or terms of
+service is **solely the responsibility of the user**. If you are a
+platform vendor, AV, or rights-holder and need the set trimmed, open an
+issue.
 
 ---
 
