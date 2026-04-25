@@ -21,21 +21,40 @@ Analysis target: the eight `.sh` self-extracting installers in
 
 ```
 kernel-module/
-├── README.md                           ← this file
+├── README.md                           ← this file (analysis overview)
+├── CLIENT.md                           ← userland client API reference
+├── RUNBOOK.md                          ← how the loaders work + load checklist
+├── load_driver.sh                      ← clean auto-selecting loader
 ├── extract_all.py                      ← reproducible extractor
 │
 ├── dev增强版对接.h                      ← original userland client header (C++)
-├── dev增强版过检测/                     ← original installers, untouched
+├── dev/ (was dev增强版过检测/)          ← original installers, untouched
 │   ├── 5.4.sh   5.4b.sh   5.4c.sh
 │   ├── 5.10.sh  5.15.sh
-│   ├── 6.1.sh   6.6.sh    6.12.sh
+│   └── 6.1.sh   6.6.sh    6.12.sh
 │
-└── mem_tool_driver/                    ← extracted, organized analysis bundle
-    ├── 5.4.ko   5.4b.ko   5.4c.ko     ELF64 / aarch64 / ET_REL
-    ├── 5.10.ko  5.15.ko
-    ├── 6.1.ko   6.6.ko    6.12.ko
-    └── kernel_client.h                 copy of the userland header
+├── mem_tool_driver/                    ← extracted, organized analysis bundle
+│   ├── 5.4.ko   5.4b.ko   5.4c.ko     ELF64 / aarch64 / ET_REL
+│   ├── 5.10.ko  5.15.ko
+│   ├── 6.1.ko   6.6.ko    6.12.ko
+│   └── kernel_client.h                 copy of the userland header
+│
+└── devwh-src/                          ← from-source audit rebuild of the .ko
+    ├── Makefile  Kbuild  README.md
+    ├── uapi/devwh_uapi.h               ioctl contract (matches kernel_client.h)
+    ├── main.c    rand.c   kallsyms.c
+    ├── hide.c    memrw.c  hwbp.c   fops.c
 ```
+
+### Docs quick-reference
+
+| File            | Question it answers                                              |
+|-----------------|------------------------------------------------------------------|
+| `README.md`     | What is this, what's in the binary, is it malicious              |
+| `CLIENT.md`     | How do I use `kernel_client.h` from my own app                   |
+| `RUNBOOK.md`    | How do the `.sh` loaders work and how do I load cleanly          |
+| `load_driver.sh`| The clean loader itself (run `sh load_driver.sh --help`)         |
+| `devwh-src/README.md` | Building the module from source instead of running the blob  |
 
 The folder name `mem_tool_driver` is taken from the binary's own internal
 symbols (`mem_tool_dev_t`, `mem_tool_class`, `memdev`) — that is what the author
