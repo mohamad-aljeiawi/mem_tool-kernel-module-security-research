@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * devwh_uapi.h -- ioctl interface between userland and the devwh kernel
- * module, reconstructed from 6.6.ko and from dev增强版对接.h (the original
- * userland header that ships with the cheat distribution).
+ * module, reconstructed from the prebuilt mem_tool .ko binaries and
+ * the userland header shipped with them (see mem_tool_driver/kernel_client.h).
  *
  * This file is the "contract" between kernel and user space. Values here
  * MUST match the prebuilt userland wrapper exactly, or the random-device

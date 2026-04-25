@@ -2,7 +2,7 @@
 /*
  * rand.c -- 6-character random device name generator.
  *
- * The userland probe (dev增强版对接.h :: driver_path) scans /dev for a
+ * The userland probe (kernel_client.h :: driver_path) scans /dev for a
  * chardev whose name is exactly 6 characters from the [A-Za-z0-9] alphabet
  * with atime == ctime, size == 0, uid == gid == 0. This module generates
  * that name once at init and uses it as its cdev and sysfs class name.

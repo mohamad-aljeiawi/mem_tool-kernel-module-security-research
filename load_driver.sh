@@ -1,25 +1,28 @@
 #!/system/bin/sh
 # SPDX-License-Identifier: GPL-2.0
 #
-# load_driver.sh -- auto-select + insmod the devwh kernel module that
-#                   matches the running Android kernel.
+# load_driver.sh -- auto-select + insmod the mem_tool kernel module
+#                   that matches the running Android kernel.
 #
-# This is a clean replacement for the self-extracting Telegram-gated
-# "dev/*.sh" loaders that shipped with the original cheat distribution.
-# It performs ONLY the steps that are necessary to load the module:
+# The .ko's baked-in modinfo name is "devwh" on every build except
+# 6.12.ko (where it is "devddyc"). The userland client in
+# kernel_client.h does not care about the module name -- it discovers
+# the chardev by signature.
+#
+# Clean replacement for the original self-extracting Telegram-gated
+# installers. Performs ONLY the necessary steps:
 #
 #   1. root check
 #   2. detect kernel version + vendor flavor via `uname -r`
 #   3. pick the matching .ko from $KO_DIR (default: mem_tool_driver/)
-#   4. print the file's sha256 and its baked-in modinfo so you can
-#      confirm what you are about to load BEFORE it runs
+#   4. print sha256 + baked-in modinfo so you can confirm BEFORE load
 #   5. insmod
 #   6. verify a 6-char chardev appeared under /dev, print it
 #
 # Explicitly NOT done, unlike the originals:
 #   - no Telegram "channel verification" gate
-#   - no `dmesg -C` (we want to keep the kernel log auditable)
-#   - no ELF hidden inside the shell script (the .ko is a real file;
+#   - no `dmesg -C` (keep the kernel log auditable)
+#   - no ELF embedded in a shell script (the .ko is a real file;
 #     you can sha256 it, sign it, etc. before running)
 #
 # Usage:
@@ -74,7 +77,7 @@ done
 # -------- force-recover path (reboot-avoiding unload) ----------------
 if [ "$RECOVER" = "1" ]; then
     log "trying rmmod for all plausible names"
-    for n in devwh devddyc devcheat; do
+    for n in devwh devddyc mem_tool; do
         rmmod "$n" 2>/dev/null && ok "rmmod $n"
     done
     exit 0

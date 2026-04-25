@@ -16,24 +16,32 @@
 #include <vector>
 #include <string>
 
+/*------------------------------------------------------------------------------
+ *  mem_tool kernel module -- userland client
+ *
+ *  Verified via IDA Pro against the shipped binaries 5.4.ko, 5.10.ko and
+ *  6.12.ko. All three share this dispatch_ioctl contract:
+ *
+ *      cmd     handler                     status
+ *      -----   --------------------------  ---------------------------
+ *      0x801   read_process_memory         supported
+ *      0x802   write_process_memory        supported
+ *      0x803   module-base resolver        supported
+ *      0x807   clear_all_hw_bps            supported
+ *      0x810   manage_process_visibility   supported (hides the caller)
+ *      0x811   manage_process_visibility   supported (unhides the caller)
+ *      else    -- no case --               returns -EINVAL
+ *
+ *  The HW-breakpoint ADD / ENABLE / DISABLE / GET_HITS handlers are compiled
+ *  into the .ko images but are NOT wired into the dispatcher -- dead code
+ *  with zero xrefs. No OP_INIT_KEY case exists either. Those entry points
+ *  are removed from this header so the client contract stays in lock-step
+ *  with the driver.
+ *----------------------------------------------------------------------------*/
 
-#define OP_CMD_HWBP_ADD      0x804
-#define OP_CMD_HWBP_GET_HITS 0x805
-#define OP_CMD_HWBP_ENABLE   0x806
-#define OP_CMD_HWBP_CLEAR    0x807
-#define OP_CMD_HWBP_DISABLE  0x809
-#define OP_CMD_HIDE_PROCESS 0x810
+#define OP_CMD_HWBP_CLEAR      0x807
+#define OP_CMD_HIDE_PROCESS    0x810
 #define OP_CMD_RECOVER_PROCESS 0x811
-
-#define HW_BP_TYPE_R    1
-#define HW_BP_TYPE_W    2
-#define HW_BP_TYPE_RW   3
-#define HW_BP_TYPE_X    4
-#define MAX_MODIFY_REGS 10
-
-
-
-
 
 class c_driver
 {
@@ -41,77 +49,30 @@ private:
 	int fd;
 	pid_t pid;
 
-	typedef struct _HW_BP_INFO {
-    pid_t pid;
-    uintptr_t addr;
-    int type;      
-    int len;
+	typedef struct _COPY_MEMORY {
+		pid_t     pid;
+		uintptr_t addr;
+		void     *buffer;
+		size_t    size;
+	} COPY_MEMORY, *PCOPY_MEMORY;
 
-    bool is_write_gp_regs;                   
-    int gp_reg_count;                        
-    int gp_reg_indices[MAX_MODIFY_REGS];     
-    uint64_t gp_reg_values[MAX_MODIFY_REGS]; 
-    bool is_write_fp_regs;
-    int fp_reg_count;                        
-    int fp_reg_indices[MAX_MODIFY_REGS];     
-    uint64_t fp_reg_values[MAX_MODIFY_REGS][2]; 
-} HW_BP_INFO;
+	typedef struct _MODULE_BASE {
+		pid_t     pid;
+		char     *name;
+		uintptr_t base;
+		short     index;
+	} MODULE_BASE, *PMODULE_BASE;
 
-struct REGS_INFO {
-    uint64_t regs[31];
-    uint64_t sp;
-    uint64_t pc;
-    uint64_t pstate;
-};
+	typedef struct _PROGRAM_PROCESS {
+		char *package_name;
+		int   pid;
+	} PROGRAM_PROCESSS;
 
-struct HWBP_HIT_ITEM {
-    pid_t task_id;
-    uintptr_t hit_addr;
-    uint64_t hit_time;
-    struct REGS_INFO regs_info;
-};
-
-typedef struct _HWBP_HIT_ARGS {
-    pid_t pid;
-    uintptr_t addr;
-    void *out_buf;      
-    int out_len;        
-    int real_count;     
-} HWBP_HIT_ARGS;
-
-
-typedef struct _COPY_MEMORY {
-    pid_t pid;
-    uintptr_t addr;
-    void* buffer;
-    size_t size;
-} COPY_MEMORY, *PCOPY_MEMORY;
-
-typedef struct _proinf{
-    uintptr_t cmaddr;
-    uintptr_t mbaddr;
-    uintptr_t isreadaddr;
-    int isread;
-} proinf, *PCOPY_proinf;
-
-typedef struct _MODULE_BASE {
-    pid_t pid;
-    char* name;
-    uintptr_t base;
-    short index;
-} MODULE_BASE, *PMODULE_BASE;
-
-typedef struct _PROGRAM_PROCESS {
-    char *package_name;
-    int pid;
-} PROGRAM_PROCESSS;
-
-enum OPERATIONS {
-    OP_INIT_KEY = 0x800,
-    OP_READ_MEM = 0x801,
-    OP_WRITE_MEM = 0x802,
-    OP_MODULE_BASE = 0x803,
-};
+	enum OPERATIONS {
+		OP_READ_MEM    = 0x801,
+		OP_WRITE_MEM   = 0x802,
+		OP_MODULE_BASE = 0x803,
+	};
 
 	char *driver_path()
 	{
@@ -185,6 +146,10 @@ enum OPERATIONS {
 					continue;
 				}
 
+				/* The driver's init routine generates a 6-char random name
+				 * (A-Za-z0-9) via get_rand_str() and registers the device
+				 * through alloc_chrdev_region/device_create. Match exactly
+				 * that signature. */
 				if (file_info.st_atime == file_info.st_ctime &&
 					file_info.st_size == 0 &&
 					file_info.st_gid == 0 &&
@@ -224,17 +189,6 @@ public:
 	void initialize(pid_t pid)
 	{
 		this->pid = pid;
-	}
-
-	bool init_key(char *key)
-	{
-		char buf[0x100];
-		strcpy(buf, key);
-		if (ioctl(fd, OP_INIT_KEY, buf) != 0)
-		{
-			return false;
-		}
-		return true;
 	}
 
 	bool read(uintptr_t addr, void *buffer, size_t size)
@@ -299,58 +253,26 @@ public:
 		return mb.base;
 	}
 
-    void hide_process() { 
-        ioctl(fd, OP_CMD_HIDE_PROCESS); 
-    }
-  
-    void recover_process() {
-        ioctl(fd, OP_CMD_RECOVER_PROCESS);
-    }
+	/* The driver's 0x810/0x811 handlers ignore the ioctl argument and act on
+	 * the *caller's* task_struct pid (read from SP_EL0 + pid offset). They
+	 * therefore only hide/unhide the calling process itself. */
+	void hide_process() {
+		ioctl(fd, OP_CMD_HIDE_PROCESS);
+	}
 
-    bool AddHwBp(HW_BP_INFO* info) {
-        if (ioctl(fd, OP_CMD_HWBP_ADD, info) != 0) {
-            return false;
-        }
-        return true;
-    }
+	void recover_process() {
+		ioctl(fd, OP_CMD_RECOVER_PROCESS);
+	}
 
-    bool UpdateAndEnableHwBp(HW_BP_INFO* info) {
-        if (ioctl(fd, OP_CMD_HWBP_ENABLE, info) != 0) {
-            return false;
-        }
-        return true;
-    }
-
-    bool DisableHwBp(int target_pid, uintptr_t addr) {
-        HW_BP_INFO info;
-        memset(&info, 0, sizeof(info));
-        info.pid = target_pid;
-        info.addr = addr;
-        if (ioctl(fd, OP_CMD_HWBP_DISABLE, &info) != 0) {
-            return false;
-        }
-        return true;
-    }
-
-
-    bool ClearHwBp() {
-        if (ioctl(fd, OP_CMD_HWBP_CLEAR, NULL) != 0) {
-            return false;
-        }
-        return true;
-    }
-
-
-    int GetHwBpHits(HWBP_HIT_ARGS* args) {
-        if (!args || !args->out_buf || args->out_len <= 0) return 0;
-        int ret = ioctl(fd, OP_CMD_HWBP_GET_HITS, args);
-        if (ret == 0) {
-            return args->real_count; 
-        }
-        return -1;
-    }
-    
-    
+	/* Clears every entry in the driver's kernel-side HW-breakpoint list.
+	 * This is the only HW-breakpoint opcode actually wired into the
+	 * dispatcher across all shipped .ko builds. */
+	bool ClearHwBp() {
+		if (ioctl(fd, OP_CMD_HWBP_CLEAR, NULL) != 0) {
+			return false;
+		}
+		return true;
+	}
 };
 
 static c_driver *driver = new c_driver();
@@ -409,7 +331,7 @@ int getPID(char* PackageName)
     strcat(cmd, PackageName);
     fp = popen(cmd,"r");
     if (!fp) return -1;
-    
+
     fscanf(fp,"%d", &pid);
     pclose(fp);
     if (pid > 0)
@@ -445,9 +367,6 @@ long GetModuleBaseAddr_Maps(char* module_name)
     return addr;
 }
 
-
-
-
 long ReadValue(long addr)
 {
     long he=0;
@@ -458,7 +377,6 @@ long ReadValue(long addr)
     }
     return he;
 }
-
 
 long ReadDword(long addr)
 {
